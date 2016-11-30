@@ -19,7 +19,6 @@ SHELL=/bin/bash
 #############################  Fortran programs  ###############################
 
 MAIN = eikonal2d_mpi
-#eikonal2d
 #short_corridor
 
 GLOBAL = kind constants
@@ -53,11 +52,13 @@ INCPATH = /usr/include ../include
 LIBPATH = /usr/local/lib
 
 
-FC=gfortran
-FFLAGS= -C -g3 -O3 -DSSE4 -fbacktrace -ffpe-trap=zero,overflow,underflow -fbound-check -Wall -Wextra
+#FC=gfortran
+#FFLAGS= -C -g3 -O3 -DSSE4 -ffpe-summary='none' -fbacktrace -ffpe-trap=zero,overflow,underflow,invalid -fbounds-check
+# -Wall -Wextra
 
-#FC = mpifort
-#FFLAGS = -C -g3 -O3 -DSSE4 
+FC = mpifort
+FFLAGS = -C -g3 -O3 -DSSE4 -ffpe-summary='none'
+
 
 FLIBS =
 #lapack  blas 

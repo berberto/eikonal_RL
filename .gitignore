@@ -1,0 +1,14 @@
+#
+#	EXCLUDE THE FOLLOWING FILES FROM GIT
+#
+include/
+main/
+modules/
+*.dat
+*.nb
+!main/Makefile
+!main/eikonal2d_mpi.f90
+!main/output/*.gp
+!modules/global
+!modules/extras/string_extras.f90
+!modules/random/randomf.f90

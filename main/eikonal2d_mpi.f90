@@ -293,7 +293,7 @@ call MPI_Init ( ierr )
 
 						r1 = (/ -1.*i, -1.*j /)
 						r = acos(dot_product(r1,drift_block)/sqrt(sum(r1**2)))
-						write(out_theta,*) i*dx, j*dx, (.5*blocksize)*dx*drift_block, r/pi, it
+						write(out_theta,"(5es14.4, i4)") i*dx, j*dx, (.5*blocksize)*dx*drift_block, r/pi, it
 					end do
 					write(out_theta,*) ''
 				end do
@@ -303,19 +303,21 @@ call MPI_Init ( ierr )
 				! .. the empirical density, the value ..
 				do i=-L, L
 					do j=-L, L
-						write(out_rho_value,*) real(i*dx,4), real(j*dx,4), &
-							real(1./(Na*dx**2)*occupation(i,j)), real(v(i,j),4), it
+						write(out_rho_value,"(4es14.4, i4)") i*dx, j*dx, 1./(Na*dx**2)*occupation(i,j), v(i,j), it
 					end do
 					write(out_rho_value,*) ''
 				end do
 				write(out_rho_value,*) ''
 				write(out_rho_value,*) ''
+
+				call MPI_Finalize(ierr)
+				stop
 	
 				! .. and their radial averages
 				radial_rho = radial_average(real(occupation, dp))/(Na*dx**2)
 				radial_val = radial_average(v)
 				do i=0, L
-					write(out_radial,*) i*dx, radial_rho(i), radial_val(i), it
+					write(out_radial,"(3es14.4, i4)") i*dx, radial_rho(i), radial_val(i), it
 				end do
 				write(out_radial,*) ''
 				write(out_radial,*) ''
@@ -330,7 +332,7 @@ call MPI_Init ( ierr )
 			do i=1, Na
 				
 				if ((mod(ts,int(.01/dt))==0).and.(i .le. Ntraj).and.(it==its)) then
-					write(out_traj(i),*) ts*dt, dx*state(i,:)
+					write(out_traj(i),"(3es14.4)") ts*dt, dx*state(i,:)
 				end if
 				
 				x = state(i,:)
@@ -383,7 +385,7 @@ call MPI_Init ( ierr )
 
 			!	Print the average reward per walker at some time steps
 			if (mod(ts,int(.01/dt))==0) then
-				write(out_cost,*) ts*dt, avrew , rewbar
+				write(out_cost,"(3es14.4)") ts*dt, avrew , rewbar
 			end if
 	
 		end do
@@ -419,14 +421,14 @@ call MPI_Init ( ierr )
 	! print the average density and value (averaged over last T-Trlx --every 100-- steps)
 	do i=-L, L
 		do j=-L, L
-			write(out_rho_av,*) i*dx, j*dx, rho_av(i,j)
+			write(out_rho_av,"(3es14.4)") i*dx, j*dx, rho_av(i,j)
 		end do
 		write(out_rho_av,*) ''
 	end do
 	radial_rho = axis_average_1s(rho_av)	! radial_average(rho_av)
 	radial_val = axis_average_1s(v_av)		! radial_average(v_av)
 	do i=0, L
-		write(out_radial,*) i*dx, radial_rho(i), radial_val(i)
+		write(out_radial,"(3es14.4)") i*dx, radial_rho(i), radial_val(i)
 	end do
 	
 	do i=1, Ntraj
