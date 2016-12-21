@@ -104,17 +104,17 @@ program eikonal2d
 	integer :: i, j, ii, jj, a, ts, it		! running indices
 	integer :: x(2), x_new(2)
 	integer, allocatable :: state(:,:), state_new(:,:) ! first index is the agent, second is the lattice position
-	integer :: occupation(-L:L, -L:L), occupation_new(-L:L, -L:L)	! matrix with occupation numbers
+	integer :: x_occ(-L:L, -L:L), x_occ_new(-L:L, -L:L)	! occupation numbers in position space
 	real(dp) :: rho_av(-L:L, -L:L)		! density averaged over several steps
 
 	integer :: visits(-L:L, -L:L)		! counting of visits at a lattice point
 	
-	real(dp) :: v(-L:L, -L:L), v_new(-L:L, -L:L), v_av(-L:L,-L:L) ! table with the value of the state
+	real(dp) :: v(-L:L, -L:L), v_av(-L:L,-L:L) ! table with the value of the state
 	integer :: act(0:4, 2)	! first index is the action, second is lattice displacement
-	real(dp) :: theta(-L:L, -L:L), theta_new(-L:L, -L:L) ! table of the parameter of the policy
+	real(dp) :: theta(-L:L, -L:L), dtheta(-L:L, -L:L)	! table of the parameter of the policy
 	real(dp) :: drift_block(2)
 	integer :: blocksize = 2
-	real(dp) :: rew, rewbar, rewbar_new, avrew, delta
+	real(dp) :: rew, rewbar, rewbar_new, avrew, delta, dv
 	real(dp) :: radial_rho(0:L), radial_val(0:L)
 
 	real(dp) :: r1(2), r2(2)
@@ -174,8 +174,6 @@ call MPI_Init ( ierr )
 	beta = .8
 	eta = .05
 
-!	call  MPI_Finalize (ierr)
-!	stop
 
 	allocate(state(Na,2), state_new(Na,2))
 
@@ -197,7 +195,7 @@ call MPI_Init ( ierr )
 	act(4,:) = (/ -1, 0 /)	! move LEFT
 
 	! Initialization of occupation and visits matrices
-	occupation_new = 0
+	x_occ_new = 0
 	visits = 0
 
 	! Initialization estimate of the stationary density
@@ -206,7 +204,6 @@ call MPI_Init ( ierr )
 
 	! Initialization VALUE function
 	v = 0.	
-	v_new = 0.
 	rewbar = 0.
 	rewbar_new = 0.
 	
@@ -223,7 +220,7 @@ call MPI_Init ( ierr )
 		read(in_vt,*) rewbar
 		do i=-L,L
 			do j=-L, L
-				read(in_vt,*) v(i,j), theta_new(i,j)
+				read(in_vt,*) v(i,j), theta(i,j)
 			end do
 		end do
 	else
@@ -235,29 +232,18 @@ call MPI_Init ( ierr )
 		do i=-L, L
 			do j=-L, L
 				call random_number(r)
-				theta_new(i,j) = 2.*pi*r
+				theta(i,j) = 2.*pi*r
 			end do
 		end do
 	end if
 	do i=1, Na
-		occupation_new(state(i,1), state(i,2)) = occupation_new(state(i,1), state(i,2)) + 1
+		x_occ_new(state(i,1), state(i,2)) = x_occ_new(state(i,1), state(i,2)) + 1
 		visits(state(i,1), state(i,2)) = visits(state(i,1), state(i,2)) + 1
 	end do
 	close(in_states)
 	close(in_vt)
-	occupation = occupation_new
+	x_occ = x_occ_new
 
-
-!	do i=-L, L
-!		do j=-L, L
-!			r1 = (/ -1.*i, -1.*j /)
-!			r2 = (/ cos(theta_new(i,j)), sin(theta_new(i,j)) /)
-!			r = acos(dot_product(r1,r2)/sqrt(sum(r1**2)))
-!			write(100,*) i*dx, j*dx, r/pi
-!		end do
-!		write(100,*) ''
-!	end do
-!	stop
 
 	!
 	!	START THE LEARNING
@@ -267,8 +253,6 @@ call MPI_Init ( ierr )
 	do it=1, its
 		write(101+proc,fmt="(a, f7.4, a, i2)") "... g = ", g, ",  iteration ", it
 		do ts=0, T
-			! update theta field
-			theta = theta_new
 	
 			!
 			!	SNAPSHOTS every 10 time units, for the last iteration
@@ -303,18 +287,15 @@ call MPI_Init ( ierr )
 				! .. the empirical density, the value ..
 				do i=-L, L
 					do j=-L, L
-						write(out_rho_value,"(4es14.4, i4)") i*dx, j*dx, 1./(Na*dx**2)*occupation(i,j), v(i,j), it
+						write(out_rho_value,"(4es14.4, i4)") i*dx, j*dx, 1./(Na*dx**2)*x_occ(i,j), v(i,j), it
 					end do
 					write(out_rho_value,*) ''
 				end do
 				write(out_rho_value,*) ''
 				write(out_rho_value,*) ''
 
-				call MPI_Finalize(ierr)
-				stop
-	
 				! .. and their radial averages
-				radial_rho = radial_average(real(occupation, dp))/(Na*dx**2)
+				radial_rho = radial_average(real(x_occ, dp))/(Na*dx**2)
 				radial_val = radial_average(v)
 				do i=0, L
 					write(out_radial,"(3es14.4, i4)") i*dx, radial_rho(i), radial_val(i), it
@@ -325,10 +306,14 @@ call MPI_Init ( ierr )
 			end if
 
 			!
-			!	At each time step, move particles one at a time
-			!	and update value and policy syncronously
+			!	At each time step...
 			!
 			avrew = 0
+			rew = 0
+			dtheta = 0
+			!
+			!	move particles according to current policy
+			!
 			do i=1, Na
 				
 				if ((mod(ts,int(.01/dt))==0).and.(i .le. Ntraj).and.(it==its)) then
@@ -347,39 +332,50 @@ call MPI_Init ( ierr )
 				if ((abs(x_new(1)) .gt. L) .or. (abs(x_new(2)) .gt. L)) then
 					x_new(:) = x(:) - act(a,:)
 				end if
-				
-				rew = -(q(x_new) + collision(x_new))
-	
-				avrew = avrew + rew/Na
-	
-				delta = rew - rewbar + v(x_new(1),x_new(2)) - v(x(1), x(2))
-	
-				rewbar_new = rewbar_new + eta/(1.+(ts+1)**.6)*delta/Na
-				
-				v_new(x(1), x(2)) = v_new(x(1), x(2)) + beta*delta/(1.+(visits(x(1), x(2))/Na**.5)**.6) 
-				
-				theta_new(x(1), x(2)) = modulo(theta_new(x(1), x(2)) + &
-						alpha/(1.+(visits(x(1), x(2))/Na**.5)**.3)*delta*elgb(a), 2.*pi)
-	
-				! save new occupation matrix
-				visits(x_new(1), x_new(2)) = visits(x_new(1), x_new(2)) + 1
-	
-				occupation_new(x(1), x(2)) = occupation_new(x(1), x(2)) - 1
-				occupation_new(x_new(1), x_new(2)) = occupation_new(x_new(1), x_new(2)) + 1
-	
+
+				! accumulate reward
+				rew = rew - (q(x_new) + collision(x_new))
+
+				! accumulate differences for the policy parameters
+				dtheta(x(1), x(2)) = dtheta(x(1), x(2)) + &
+						alpha/(1.+(visits(x(1), x(2))/Na**.5)**.3)*delta*elgb(a)
+
 				! update state
 				state_new(i,:) = x_new
-	
+
+				! update occupation matrix
+				x_occ_new(x(1), x(2)) = x_occ_new(x(1), x(2)) - 1
+				x_occ_new(x_new(1), x_new(2)) = x_occ_new(x_new(1), x_new(2)) + 1
+				
 			end do
-			
-			state = state_new
-			v = v_new
-			rewbar = rewbar_new
-			occupation = occupation_new
+			avrew = rew/Na
+
+			! difference of the value estimates in the new and in the old state:
+			! - features for the value of the full state are the occupation numbers of lattice points;
+			! - coefficients are the values at lattice points.
+			dv = sum( v*(x_occ_new - x_occ) )
+
+			! calculate the error
+			delta = rew - rewbar + dv
+
+			! update baseline -- steady state reward rate
+			rewbar = rewbar + eta/(1.+(ts+1)**.6)*delta
+
+			! update value parameters (value of each lattice point)
+			v = v + beta*delta/(1.+(visits/Na**.5)**.6)*x_occ
+
+			! update policy parametes
+			theta = modulo(theta + alpha/(1.+(visits/Na**.5)**.3)*dtheta, 2.*pi)
+
+			! update number of visits per each state
+			visits = visits + x_occ_new
+
+			! update occupation number
+			x_occ = x_occ_new
 	
 			! after Trlx relaxation steps, sample the empirical density every 100 steps
 			if ((ts > Trlx).and.(mod(ts-Trlx, 100).eq.1).and.(it == its)) then
-				rho_av = rho_av + 1./float((T-Trlx)/100)*(occupation/(Na*dx**2.))
+				rho_av = rho_av + 1./float((T-Trlx)/100)*(x_occ/(Na*dx**2.))
 				v_av = v_av + 1./float((T-Trlx)/100)*v
 			end if
 
@@ -461,8 +457,8 @@ contains
 		integer, intent(in) :: x(2)
 		real(dp) :: collision
 !		integer :: pairs
-!		pairs = occupation(x(1),x(2))*(occupation(x(1),x(2)) - 1)
-		collision = g*(Na-1)*dx**2.*(occupation(x(1),x(2))-1)
+!		pairs = x_occ(x(1),x(2))*(x_occ(x(1),x(2)) - 1)
+		collision = g*(Na-1)*dx**2.*(x_occ(x(1),x(2))-1)
 	end function collision
 
 
