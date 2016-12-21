@@ -117,17 +117,16 @@ program eikonal2d
 	real(dp) :: rew, rewbar, rewbar_new, avrew, delta, dv
 	real(dp) :: radial_rho(0:L), radial_val(0:L)
 
-	real(dp) :: r1(2), r2(2)
+	real(dp) :: r1(2)
 	
 	! input
 	integer :: in_states=151, in_vt=152, states_error=153, vt_error=154
-	character(len=62) :: in_form, in_name_states, in_name_vt
+	character(len=62) :: in_name_states, in_name_vt
 
 	! output
 	integer, parameter :: Ntraj = 100
-	integer :: out_std = 100
 	integer :: out_traj(Ntraj) = 1000, out_cost=2001, out_theta=2002, &
-			out_rho_value=2003, out_rho_av=2004, out_radial=2005, out_dev=2006
+			out_rho_value=2003, out_rho_av=2004, out_radial=2005
 	character(len=64) :: out_form, out_dir, out_name, mk_dir
 
 	do i=1,Ntraj
@@ -381,7 +380,7 @@ call MPI_Init ( ierr )
 
 			!	Print the average reward per walker at some time steps
 			if (mod(ts,int(.01/dt))==0) then
-				write(out_cost,"(3es14.4)") ts*dt, avrew , rewbar
+				write(out_cost,"(3es14.4)") ts*dt, rew/Na , rewbar/Na
 			end if
 	
 		end do
@@ -507,7 +506,7 @@ contains
 	function axis_average (f)
 		real(dp) :: f(-L:L,-L:L)
 		real(dp) :: axis_average(-L:L)
-		integer :: i, j, ind
+		integer :: i
 		axis_average = 0
 		do i=-L, L
 			axis_average(i) = (f(i,0)+f(0,i))/2.
@@ -518,7 +517,7 @@ contains
 	function axis_average_1s (f)
 		real(dp) :: f(-L:L,-L:L)
 		real(dp) :: axis_average_1s(0:L)
-		integer :: i, j, ind
+		integer :: i
 		axis_average_1s = 0
 		do i=0, L
 			axis_average_1s(i) = (f(i,0)+f(0,i)+f(-i,0)+f(0,-i))/4.

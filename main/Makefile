@@ -18,7 +18,9 @@ SHELL=/bin/bash
 
 #############################  Fortran programs  ###############################
 
-MAIN = eikonal2d_pe   theta_diffs  eikonal2d_mpi
+MAIN = eikonal2d_mpi
+#theta_diffs
+#eikonal2d_pe
 #short_corridor
 
 GLOBAL = kind constants
@@ -56,9 +58,8 @@ LIBPATH = /usr/local/lib
 #FFLAGS= -C -g3 -O3 -DSSE4 -ffpe-summary='none' -fbacktrace -ffpe-trap=zero,overflow,underflow -fbounds-check
 # -Wall -Wextra
 
-FC = mpif90
-FFLAGS = -C -g3 -O3 -DSSE4 
-#-ffpe-summary='none'
+FC = mpifort
+FFLAGS = -C -g3 -O3 -DSSE4 -ffpe-summary='none' -Wunused-variable
 
 
 FLIBS =
