@@ -9,8 +9,6 @@ module consts_funcs
 	
 	implicit none
 
-!	include 'mpif.h'
-
 	real(dp), parameter :: k = 1.				! curvature harmonic potential
 	real(dp), parameter :: D = 1				! diffusion constant
 	real(dp), parameter :: U = 2.				! speed
@@ -170,9 +168,9 @@ call MPI_Init ( ierr )
 
 	! # of process labels the value of g used in the simulation
 	g = gvals(proc)
-	alpha = .05!/Na
-	beta = .8!/Na
-	eta = 1.!/Na
+	alpha = .05/Na
+	beta = 8./Na
+	eta = 100./Na
 
 
 	allocate(state(Na,2), state_new(Na,2))
@@ -312,7 +310,7 @@ call MPI_Init ( ierr )
 			v_new = sum(w*occ_new)
 
 			! calculate the error
-			delta = (rew - rewbar + v_new - v)/Na
+			delta = (rew - rewbar + v_new - v)
 
 			write(99,"(6es16.6)") dt*ts, rew, rewbar, v_new, v, delta
 
@@ -342,7 +340,7 @@ call MPI_Init ( ierr )
 
 			!	Print the average reward per walker at some time steps
 			if (mod(ts,int(.01/dt))==0) then
-				write(out_cost,"(3es14.4)") ts*dt, rew, rewbar
+				write(out_cost,"(3es14.4)") ts*dt, rew/Na, rewbar/Na
 				call flush(out_cost)
 			end if
 	
