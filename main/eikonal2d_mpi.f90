@@ -1,5 +1,3 @@
-! QUI UNA PROVA
-
 !
 !	Module with constants and functions
 !
@@ -18,9 +16,9 @@ module consts_funcs
 	real(dp), parameter :: Dt = .0001			! time discretization
 	real(dp), parameter :: R = 10.				! square domain (-R,R)x(-R,R)
 	integer, parameter :: L = ceiling(R/dx)		! lattice (-L,L)x(-L,L)
-	integer, parameter :: T	= int(10./dt)		! maximum time
+	integer, parameter :: T	= int(100./dt)		! maximum time
 	integer, parameter :: Trlx = int(30./dt)	! time for equilibration 
-	integer, parameter :: its = 1				! number of iterations
+	integer, parameter :: its = 5				! number of iterations
 
 	real(dp), parameter :: delta = U*Dt/Dx
 	real(dp), parameter :: sigma = 2.*D*Dt/(Dx**2.)
@@ -140,18 +138,31 @@ program eikonal2d
 	!
 	!	Parameters from command line
 	! 
-	if ((iargc() > 21) .or. (iargc() < 1)) then
+	if ((iargc() > 24) .or. (iargc() < 4)) then
 		print *, "Input"
 		print *, "1      -> number of agents"
-		print *, "2(-21) -> array with values of the interaction strength"
+		print *, "2,3,4  -> learning rates (for, in order: policy, value, av_value)"
+		print *, "5(-24) -> array with values of the interaction strength"
 		call exit (1)
 	end if
 	
 	call getarg(1,arg)
 	read(arg,*) Na
+	
+!	alpha = 70./Na ! .07
+	call getarg(2,arg)
+	read(arg,*) alpha
+	
+!	beta = 100./Na ! .1
+	call getarg(2,arg)
+	read(arg,*) beta
 
-	do i=0, iargc()-2
-		call getarg(i+2,arg)
+!	eta = 10./Na ! .01
+	call getarg(2,arg)
+	read(arg,*) eta
+
+	do i=0, iargc()-5
+		call getarg(i+5,arg)
 		read(arg,*) gvals(i)
 	end do
 
@@ -170,9 +181,7 @@ call MPI_Init ( ierr )
 
 	! # of process labels the value of g used in the simulation
 	g = gvals(proc)
-	alpha = .05/Na
-	beta = 8./Na
-	eta = 100./Na
+	
 
 
 	allocate(state(Na,2), state_new(Na,2))
@@ -183,6 +192,9 @@ call MPI_Init ( ierr )
 	call set_IO ()
 
 	write(100+proc,fmt="(a, i2, a, f7.4, a)") "Process ", proc, ", g = ", g, " --> started..."
+
+	call MPI_Finalize( ierr )
+	stop
 	
 	! inizialize random number generator
 	call seed_from_urandom(seed)
