@@ -192,9 +192,6 @@ call MPI_Init ( ierr )
 	call set_IO ()
 
 	write(100+proc,fmt="(a, i2, a, f7.4, a)") "Process ", proc, ", g = ", g, " --> started..."
-
-	call MPI_Finalize( ierr )
-	stop
 	
 	! inizialize random number generator
 	call seed_from_urandom(seed)

@@ -1,1 +1,5 @@
 RL multi-agents constant control
+
+qsub command must be given as:
+
+	a='.1'; b='.5'; e='.01'; p='1000' && qsub -v alpha=$a,beta=$b,eta=$e,n=$p -N $p-$a-$b-$e run_eikonal.sh

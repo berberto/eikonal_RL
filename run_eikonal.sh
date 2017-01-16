@@ -21,14 +21,8 @@
 #PBS -m abe
 #PBS -M apezzotta@sissa.it
 
-n='1000'
-
-alpha='.1'
-beta='.5'
-eta='.1'
-
 #Define the JOB name
-#PBS -N $n_000-019_$alpha_$beta_$eta
+##PBS -N 1e3_000-019
 
 #IT HAS TO BE HERE
 #PBS -T flush_cache
@@ -47,11 +41,8 @@ cd $PBS_O_WORK
 module load openmpi/1.8.3/intel/14.0
 
 gvals=()
-for i in `seq 0 9`; do
-    gvals+=("0.00"$i"0")
-done
-for i in `seq 10 19`; do
-    gvals+=("0.0"$i"0")
+for i in `seq -w 000 019`; do
+    gvals+=("0."$i"0")
 done
 
 mpirun -np ${#gvals[@]} eikonal2d_mpi $n $alpha $beta $eta ${gvals[@]}
