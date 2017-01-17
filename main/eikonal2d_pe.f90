@@ -9,6 +9,8 @@ module consts_funcs
 	
 	implicit none
 
+!	include 'mpif.h'
+
 	real(dp), parameter :: k = 1.				! curvature harmonic potential
 	real(dp), parameter :: D = 1				! diffusion constant
 	real(dp), parameter :: U = 2.				! speed
@@ -16,7 +18,7 @@ module consts_funcs
 	real(dp), parameter :: Dt = .0001			! time discretization
 	real(dp), parameter :: R = 10.				! square domain (-R,R)x(-R,R)
 	integer, parameter :: L = ceiling(R/dx)		! lattice (-L,L)x(-L,L)
-	integer, parameter :: T	= int(100./dt)		! maximum time
+	integer, parameter :: T	= int(5./dt)		! maximum time
 	integer, parameter :: Trlx = int(30./dt)	! time for equilibration 
 	integer, parameter :: its = 5				! number of iterations
 
@@ -50,7 +52,7 @@ contains
 	end function policy
 
 
-	! gradient of the log of the policy
+	! gradient of the log og the policy
 	function grad_log_pi (theta)
 		real(dp) :: theta
 		real(dp) :: grad_log_pi(0:4)
@@ -102,30 +104,30 @@ program eikonal2d
 	integer :: i, j, ii, jj, a, ts, it		! running indices
 	integer :: x(2), x_new(2)
 	integer, allocatable :: state(:,:), state_new(:,:) ! first index is the agent, second is the lattice position
-	integer :: occ(-L:L, -L:L), occ_new(-L:L, -L:L)	! occupation numbers in position space
+	integer :: occ(-L:L, -L:L), occ_new(-L:L, -L:L)	! matrix with occupation numbers
 	real(dp) :: rho_av(-L:L, -L:L)		! density averaged over several steps
 
 	integer :: visits(-L:L, -L:L)		! counting of visits at a lattice point
 	
-	real(dp) :: w(-L:L, -L:L), w_av(-L:L,-L:L) ! table with the value of the state
-	real(dp) :: v, v_new
+	real(dp) :: v(-L:L, -L:L), v_new(-L:L, -L:L), v_av(-L:L,-L:L) ! table with the value of the state
 	integer :: act(0:4, 2)	! first index is the action, second is lattice displacement
-	real(dp) :: theta(-L:L, -L:L), dtheta(-L:L, -L:L)	! table of the parameter of the policy
+	real(dp) :: theta(-L:L, -L:L), theta_new(-L:L, -L:L) ! table of the parameter of the policy
 	real(dp) :: drift_block(2)
 	integer :: blocksize = 2
 	real(dp) :: rew, rewbar, rewbar_new, avrew, delta
 	real(dp) :: radial_rho(0:L), radial_val(0:L)
 
-	real(dp) :: r1(2)
+	real(dp) :: r1(2), r2(2)
 	
 	! input
 	integer :: in_states=151, in_vt=152, states_error=153, vt_error=154
-	character(len=62) :: in_name_states, in_name_vt
+	character(len=62) :: in_form, in_name_states, in_name_vt
 
 	! output
 	integer, parameter :: Ntraj = 100
+	integer :: out_std = 100
 	integer :: out_traj(Ntraj) = 1000, out_cost=2001, out_theta=2002, &
-			out_rho_value=2003, out_rho_av=2004, out_radial=2005
+			out_rho_value=2003, out_rho_av=2004, out_radial=2005, out_dev=2006
 	character(len=64) :: out_form, out_dir, out_name, mk_dir
 
 	do i=1,Ntraj
@@ -138,31 +140,18 @@ program eikonal2d
 	!
 	!	Parameters from command line
 	! 
-	if ((iargc() > 24) .or. (iargc() < 4)) then
+	if ((iargc() > 21) .or. (iargc() < 1)) then
 		print *, "Input"
 		print *, "1      -> number of agents"
-		print *, "2,3,4  -> learning rates (for, in order: policy, value, av_value)"
-		print *, "5(-24) -> array with values of the interaction strength"
+		print *, "2(-21) -> array with values of the interaction strength"
 		call exit (1)
 	end if
 	
 	call getarg(1,arg)
 	read(arg,*) Na
-	
-!	alpha = 70./Na ! .07
-	call getarg(2,arg)
-	read(arg,*) alpha
-	
-!	beta = 100./Na ! .1
-	call getarg(2,arg)
-	read(arg,*) beta
 
-!	eta = 10./Na ! .01
-	call getarg(2,arg)
-	read(arg,*) eta
-
-	do i=0, iargc()-5
-		call getarg(i+5,arg)
+	do i=0, iargc()-2
+		call getarg(i+2,arg)
 		read(arg,*) gvals(i)
 	end do
 
@@ -181,8 +170,12 @@ call MPI_Init ( ierr )
 
 	! # of process labels the value of g used in the simulation
 	g = gvals(proc)
-	
+	alpha = 0.
+	beta = 0.
+	eta = 0.
 
+!	call  MPI_Finalize (ierr)
+!	stop
 
 	allocate(state(Na,2), state_new(Na,2))
 
@@ -204,15 +197,16 @@ call MPI_Init ( ierr )
 	act(4,:) = (/ -1, 0 /)	! move LEFT
 
 	! Initialization of occupation and visits matrices
-	occ_new = 0
+	occupation_new = 0
 	visits = 0
 
 	! Initialization estimate of the stationary density
 	rho_av = 0.
-	w_av = 0.
+	v_av = 0.
 
 	! Initialization VALUE function
-	w = 0.	
+	v = 0.	
+	v_new = 0.
 	rewbar = 0.
 	rewbar_new = 0.
 	
@@ -220,164 +214,112 @@ call MPI_Init ( ierr )
 	!	INITIALIZATION OF STATES AND POLICY
 	!
 	! --------------------------------------------------------------------------
-	if ((states_error == 0).and.(vt_error == 0)) then
-		! read walker positions from file
-		do i=1, Na
-			read(in_states,*) state(i,:)
-		end do
-		! read value and policy parameters from file
-		read(in_vt,*) rewbar
-		do i=-L,L
-			do j=-L, L
-				read(in_vt,*) w(i,j), theta(i,j)
-			end do
-		end do
-	else
-		! random initialization of the position of the walkers
-		do i=1, Na
-			state(i,:) = (/ random_integer(-L,L), random_integer(-L,L) /)
-		end do
-		! random initialization of the policy parameters
-		do i=-L, L
-			do j=-L, L
-				call random_number(r)
-				theta(i,j) = 2.*pi*r
-			end do
-		end do
-	end if
 	do i=1, Na
-		occ_new(state(i,1), state(i,2)) = occ_new(state(i,1), state(i,2)) + 1
-		visits(state(i,1), state(i,2)) = visits(state(i,1), state(i,2)) + 1
+		state(i,:) = (/ 0, 0 /)
 	end do
-	close(in_states)
-	close(in_vt)
-	occ = occ_new
-
+	occupation_new = 0
+	occupation_new(0,0) = Na
+	occupation = occupation_new
+	
+	do i=-L, L
+		do j=-L, L
+			if (j > 0) then
+				theta(i,j) = pi + acos((i-.5)/sqrt((i-.5)**2. + (j-.5)**2.))
+			else
+				theta(i,j) = pi - acos((i-.5)/sqrt((i-.5)**2. + (j-.5)**2.))
+			end if
+			write (out_theta, *) i*dx, j*dx, .6*dx*cos(theta(i,j)), .6*dx*sin(theta(i,j))
+		end do
+		write (out_theta, *) ''
+	end do
+! 	call MPI_Finalize( ierr )
+! 	stop
 
 	!
 	!	START THE LEARNING
 	!
 	! --------------------------------------------------------------------------
-	! Take T steps for each iteration, for its iterations
-	do it=1, its
-		write(100+proc,fmt="(a, f7.4, a, i2)") "... g = ", g, ",  iteration ", it
-		do ts=0, T
+	avrew = 0.
+	do ts=0, T
 	
-			!
-			!	SNAPSHOTS every 10 time units
-			!
-			if (mod(ts,int(10/dt))==0) then
-				call snapshot()
-			end if
-
-			!
-			!	At each time step move particles according to current policy
-			!
-			rew = 0.
-			dtheta = 0
-			do i=1, Na
-				
-				if ((mod(ts,int(.01/dt))==0).and.(i .le. Ntraj).and.(it==its)) then
-					write(out_traj(i),"(3es14.4)") ts*dt, dx*state(i,:)
-				end if
-				
-				x = state(i,:)
-				p = policy(theta(x(1), x(2)))
-				elgb = grad_log_pi(theta(x(1), x(2)))
-	
-				! choose 'a' according to the policy
-				call choose_action(a)
-	
-				! take action: move in the opposite direction if going outside the domain
-				x_new(:) = x(:) + act(a,:)
-				if ((abs(x_new(1)) .gt. L) .or. (abs(x_new(2)) .gt. L)) then
-					x_new(:) = x(:) - act(a,:)
-				end if
-
-				! accumulate reward
-				rew = rew - (q(x_new) + collision(x_new))
-
-				! accumulate differences for the policy parameters
-				dtheta(x(1), x(2)) = dtheta(x(1), x(2)) + elgb(a)
-
-				! save new state
-				state_new(i,:) = x_new
-
-				! update occupation matrix
-				occ_new(x(1), x(2)) = occ_new(x(1), x(2)) - 1
-				occ_new(x_new(1), x_new(2)) = occ_new(x_new(1), x_new(2)) + 1
-				
-			end do
-
-			! initially set rewbar to rew
-			if(ts==0) then
-				rewbar = rew
-			end if
-			avrew = rew/Na
-
-			! value estimates of old and new states
-			! (features for the value are the occupation numbers)
-			v = sum(w*occ)
-			v_new = sum(w*occ_new)
-
-			! calculate the error
-			delta = (rew - rewbar + v_new - v)
-
-			!write(99,"(6es16.6)") dt*ts, rew, rewbar, v_new, v, delta
-
-			! update policy parametes
-			theta = modulo(theta + alpha/(1.+(ts+1)**.3)*delta*dtheta, 2.*pi)
-
-			! update value parameters (value of each lattice point)
-			w = w + beta/(1.+(ts+1)**.6)*delta*occ
-
-			! update baseline -- steady state reward rate
-			rewbar = rewbar + eta/(1.+(ts+1)**.6)*delta
-
-			! update number of visits per each lattice point
-			visits = visits + occ_new
-
-			! update occupation numbers (feature)
-			occ = occ_new
-
-			! update state
-			state = state_new
-	
-			! after Trlx relaxation steps, sample the empirical density every 100 steps
-			if ((ts > Trlx).and.(mod(ts-Trlx, 100).eq.1).and.(it == its)) then
-				rho_av = rho_av + 1./float((T-Trlx)/100)*(occ/(Na*dx**2.))
-				w_av = w_av + 1./float((T-Trlx)/100)*w/Na
-			end if
-
-			!	Print the average reward per walker at some time steps
-			if (mod(ts,int(.01/dt))==0) then
-				write(out_cost,"(3es14.4)") ts*dt, rew/Na, rewbar/Na
-				call flush(out_cost)
-			end if
-	
-		end do
-		write(out_cost,*) ''
-		write(out_cost,*) ''
-
-
-		! at the end of each iteration, save
-		! ..states
-		open(unit=in_states, file=trim(adjustl(in_name_states)), action="write", status="replace")
-		! ..thetas
-		open(unit=in_vt, file=trim(adjustl(in_name_vt)), action="write", status="replace")
 		do i=1, Na
-			write(in_states,*) state(i,:)
+			
+			x = state(i,:)
+			p = policy(theta(x(1), x(2)))
+			elgb = grad_log_pi(theta(x(1), x(2)))
+
+			! choose 'a' according to the policy
+			call choose_action(a)
+
+			! take action: move in the opposite direction if going outside the domain
+			x_new(:) = x(:) + act(a,:)
+			if ((abs(x_new(1)) .gt. L) .or. (abs(x_new(2)) .gt. L)) then
+				x_new(:) = x(:) - act(a,:)
+			end if
+
+! 			rew = q(x_new)
+! 			avrew = avrew + dt*rew/Na
+
+			! accumulate reward
+			rew = rew - (q(x_new) + collision(x_new))
+
+			! accumulate differences for the policy parameters
+			dtheta(x(1), x(2)) = dtheta(x(1), x(2)) + elgb(a)
+
+			! save new state
+			state_new(i,:) = x_new
+
+			! update occupation matrix
+			occ_new(x(1), x(2)) = occ_new(x(1), x(2)) - 1
+			occ_new(x_new(1), x_new(2)) = occ_new(x_new(1), x_new(2)) + 1
+
 		end do
-		write(in_vt,*) rewbar
-		do i=-L,L
-			do j=-L, L
-				write(in_vt,*) w(i,j), theta(i,j)
-			end do
-		end do
-		close(in_states)
-		close(in_vt)
-				
+		
+		! initially set rewbar to rew
+		if(ts==0) then
+			rewbar = rew
+		end if
+		avrew = rew/Na
+
+		! value estimates of old and new states
+		! (features for the value are the occupation numbers)
+		v = sum(w*occ)
+		v_new = sum(w*occ_new)
+
+		! calculate the error
+		delta = (rew - rewbar + v_new - v)
+
+		!write(99,"(6es16.6)") dt*ts, rew, rewbar, v_new, v, delta
+
+		! update policy parametes
+		theta = modulo(theta + alpha/(1.+(ts+1)**.3)*delta*dtheta, 2.*pi)
+
+		! update value parameters (value of each lattice point)
+		w = w + beta/(1.+(ts+1)**.6)*delta*occ
+
+		! update baseline -- steady state reward rate
+		rewbar = rewbar + eta/(1.+(ts+1)**.6)*delta
+
+		! update number of visits per each lattice point
+		visits = visits + occ_new
+
+		! update occupation numbers (feature)
+		occ = occ_new
+
+		! update state
+		state = state_new
+		
+		!	Print the average reward per walker at some time steps
+		write(out_cost,"(3es14.4)") ts*dt, avrew , rewbar
+		if (mod(ts,100) .eq. 0) then
+			call flush(out_cost)
+		end if
+
 	end do
+	close(out_cost)
+	close(out_theta)
+	call MPI_Finalize( ierr )
+	stop
 	! ---------------------- end of the learning -------------------------------
 
 
@@ -393,7 +335,7 @@ call MPI_Init ( ierr )
 		write(out_rho_av,*) ''
 	end do
 	radial_rho = axis_average_1s(rho_av)	! radial_average(rho_av)
-	radial_val = axis_average_1s(w_av)		! radial_average(w_av)
+	radial_val = axis_average_1s(v_av)		! radial_average(v_av)
 	do i=0, L
 		write(out_radial,"(3es14.4)") i*dx, radial_rho(i), radial_val(i)
 	end do
@@ -428,8 +370,8 @@ contains
 		integer, intent(in) :: x(2)
 		real(dp) :: collision
 !		integer :: pairs
-!		pairs = occ(x(1),x(2))*(occ(x(1),x(2)) - 1)
-		collision = .5*g*(occ(x(1),x(2))-1) ! *(Na-1)*dx**2.
+!		pairs = occupation(x(1),x(2))*(occupation(x(1),x(2)) - 1)
+		collision = g*(Na-1)*dx**2.*(occupation(x(1),x(2))-1)
 	end function collision
 
 
@@ -453,32 +395,32 @@ contains
 	end subroutine choose_action
 
 
-!	function radial_average (f)
-!		real(dp) :: f(-L:L,-L:L)
-!		real(dp) :: radial_average(0:L)
-!		integer :: counter(0:L)
-!		integer :: i, j, ind
-!		counter = 0
-!		radial_average = 0
-!		do j=-L, L
-!			do i=-L, L
-!				ind = int(sqrt(i**2. + j**2.))
-!				if (ind <= L) then
-!					counter(ind) = counter(ind) + 1
-!					radial_average(ind) = radial_average(ind) + f(i,j)
-!				end if
-!			end do
-!		end do
-!		do i=0, L
-!			radial_average(i) = radial_average(i)/counter(i)
-!		end do
-!	end function radial_average
+	function radial_average (f)
+		real(dp) :: f(-L:L,-L:L)
+		real(dp) :: radial_average(0:L)
+		integer :: counter(0:L)
+		integer :: i, j, ind
+		counter = 0
+		radial_average = 0
+		do i=-L, L
+			do j=-L, L
+				ind = int(sqrt(i**2. + j**2.))
+				if (ind <= L) then
+					counter(ind) = counter(ind) + 1
+					radial_average(ind) = radial_average(ind) + f(i,j)
+				end if
+			end do
+		end do
+		do i=0, L
+			radial_average(i) = radial_average(i)/counter(i)
+		end do
+	end function radial_average
 
 
 	function axis_average (f)
 		real(dp) :: f(-L:L,-L:L)
 		real(dp) :: axis_average(-L:L)
-		integer :: i
+		integer :: i, j, ind
 		axis_average = 0
 		do i=-L, L
 			axis_average(i) = (f(i,0)+f(0,i))/2.
@@ -489,7 +431,7 @@ contains
 	function axis_average_1s (f)
 		real(dp) :: f(-L:L,-L:L)
 		real(dp) :: axis_average_1s(0:L)
-		integer :: i
+		integer :: i, j, ind
 		axis_average_1s = 0
 		do i=0, L
 			axis_average_1s(i) = (f(i,0)+f(0,i)+f(-i,0)+f(0,-i))/4.
@@ -566,51 +508,5 @@ contains
 		write(in_name_vt,*) trim(adjustl(out_dir)) // "/previous_value_thetas.dat"
 		open(unit=in_vt, file=trim(adjustl(in_name_vt)), action="read", status="old", iostat=vt_error)
 	end subroutine set_IO
-
-
-	subroutine snapshot ()
-		! .. print the drift vector field
-		do i=-L, L-blocksize, blocksize
-			do j=-L, L-blocksize, blocksize
-				! write one direction vector per block (skipping the others)
-!				drift_block = (/ cos(theta(i,j)), sin(theta(i,j)) /)
-				! write the average over blocks of the direction vector
-				drift_block = 0.
-				do ii=0, blocksize-1
-					do jj=0, blocksize-1
-						drift_block(1) = drift_block(1) + cos(theta(i+ii, j+jj))
-						drift_block(2) = drift_block(2) + sin(theta(i+ii, j+jj))
-					end do
-				end do
-				drift_block = drift_block/sqrt(sum(drift_block**2.))
-
-				r1 = (/ -1.*i, -1.*j /)
-				r = acos(dot_product(r1,drift_block)/sqrt(sum(r1**2)))
-				write(out_theta,"(5es14.4, i4)") i*dx, j*dx, (.5*blocksize)*dx*drift_block, r/pi, it
-			end do
-			write(out_theta,*) ''
-		end do
-		write(out_theta,*) ''
-		write(out_theta,*) ''
-
-		! .. the empirical density, the value ..
-		do i=-L, L
-			do j=-L, L
-				write(out_rho_value,"(4es14.4, i4)") i*dx, j*dx, 1./(Na*dx**2)*occ(i,j), w(i,j), it
-			end do
-			write(out_rho_value,*) ''
-		end do
-		write(out_rho_value,*) ''
-		write(out_rho_value,*) ''
-
-		! .. and their radial averages
-		radial_rho = axis_average_1s(real(occ, dp))/(Na*dx**2)
-		radial_val = axis_average_1s(w)
-		do i=0, L
-			write(out_radial,"(3es14.4, i4)") i*dx, radial_rho(i), radial_val(i), it
-		end do
-		write(out_radial,*) ''
-		write(out_radial,*) ''
-	end subroutine snapshot 
 
 end program eikonal2d
