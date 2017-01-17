@@ -9,6 +9,7 @@ modules/
 *.jpg
 !main/Makefile
 !main/eikonal2d_mpi.f90
+!main/eikonal2d_pe.f90
 !main/output/*.gp
 !modules/global
 !modules/extras/string_extras.f90
