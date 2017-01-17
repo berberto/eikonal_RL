@@ -453,26 +453,26 @@ contains
 	end subroutine choose_action
 
 
-	function radial_average (f)
-		real(dp) :: f(-L:L,-L:L)
-		real(dp) :: radial_average(0:L)
-		integer :: counter(0:L)
-		integer :: i, j, ind
-		counter = 0
-		radial_average = 0
-		do i=-L, L
-			do j=-L, L
-				ind = int(sqrt(i**2. + j**2.))
-				if (ind <= L) then
-					counter(ind) = counter(ind) + 1
-					radial_average(ind) = radial_average(ind) + f(i,j)
-				end if
-			end do
-		end do
-		do i=0, L
-			radial_average(i) = radial_average(i)/counter(i)
-		end do
-	end function radial_average
+!	function radial_average (f)
+!		real(dp) :: f(-L:L,-L:L)
+!		real(dp) :: radial_average(0:L)
+!		integer :: counter(0:L)
+!		integer :: i, j, ind
+!		counter = 0
+!		radial_average = 0
+!		do j=-L, L
+!			do i=-L, L
+!				ind = int(sqrt(i**2. + j**2.))
+!				if (ind <= L) then
+!					counter(ind) = counter(ind) + 1
+!					radial_average(ind) = radial_average(ind) + f(i,j)
+!				end if
+!			end do
+!		end do
+!		do i=0, L
+!			radial_average(i) = radial_average(i)/counter(i)
+!		end do
+!	end function radial_average
 
 
 	function axis_average (f)
@@ -604,8 +604,8 @@ contains
 		write(out_rho_value,*) ''
 
 		! .. and their radial averages
-		radial_rho = radial_average(real(occ, dp))/(Na*dx**2)
-		radial_val = radial_average(w)
+		radial_rho = axis_average_1s(real(occ, dp))/(Na*dx**2)
+		radial_val = axis_average_1s(w)
 		do i=0, L
 			write(out_radial,"(3es14.4, i4)") i*dx, radial_rho(i), radial_val(i), it
 		end do
