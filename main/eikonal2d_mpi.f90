@@ -16,9 +16,9 @@ module consts_funcs
 	real(dp), parameter :: Dt = .0001			! time discretization
 	real(dp), parameter :: R = 10.				! square domain (-R,R)x(-R,R)
 	integer, parameter :: L = ceiling(R/dx)		! lattice (-L,L)x(-L,L)
-	integer, parameter :: T	= int(100./dt)		! maximum time
+	integer, parameter :: T	= int(50./dt)		! maximum time
 	integer, parameter :: Trlx = int(30./dt)	! time for equilibration 
-	integer, parameter :: its = 5				! number of iterations
+	integer, parameter :: its = 1				! number of iterations
 
 	real(dp), parameter :: delta = U*Dt/Dx
 	real(dp), parameter :: sigma = 2.*D*Dt/(Dx**2.)
@@ -154,11 +154,11 @@ program eikonal2d
 	read(arg,*) alpha
 	
 !	beta = 100./Na ! .1
-	call getarg(2,arg)
+	call getarg(3,arg)
 	read(arg,*) beta
 
 !	eta = 10./Na ! .01
-	call getarg(2,arg)
+	call getarg(4,arg)
 	read(arg,*) eta
 
 	do i=0, iargc()-5
@@ -238,10 +238,22 @@ call MPI_Init ( ierr )
 			state(i,:) = (/ random_integer(-L,L), random_integer(-L,L) /)
 		end do
 		! random initialization of the policy parameters
+!		do i=-L, L
+!			do j=-L, L
+!				call random_number(r)
+!				theta(i,j) = 2.*pi*r
+!			end do
+!		end do
+
+		! central drift -- for policy evaluation
 		do i=-L, L
 			do j=-L, L
-				call random_number(r)
-				theta(i,j) = 2.*pi*r
+				if (j > 0) then
+					theta(i,j) = pi + acos((i-.5)/sqrt((i-.5)**2. + (j-.5)**2.))
+				else
+					theta(i,j) = pi - acos((i-.5)/sqrt((i-.5)**2. + (j-.5)**2.))
+				end if
+				write (out_theta, *) i*dx, j*dx, .6*dx*cos(theta(i,j)), .6*dx*sin(theta(i,j))
 			end do
 		end do
 	end if
