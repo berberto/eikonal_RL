@@ -364,7 +364,6 @@ call MPI_Init ( ierr )
 			!	Print the average reward per walker at some time steps
 			if (mod(ts,int(.01/dt))==0) then
 				write(out_cost,"(3es14.4)") ts*dt, rew/Na, rewbar/Na
-				call flush(out_cost)
 			end if
 	
 		end do
