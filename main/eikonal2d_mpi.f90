@@ -285,9 +285,8 @@ call MPI_Init ( ierr )
 
 			!
 			!	Take the multi-agent action (each particle selects an action)
-			!	and observe the consequences (state and reward)
+			!	and observe the new state
 			!
-			rew = 0.
 			do i=1, Na
 				
 				if ((mod(ts,int(.01/dt))==0).and.(i .le. Ntraj).and.(it==its)) then
@@ -310,13 +309,21 @@ call MPI_Init ( ierr )
 				if ((abs(x_new(1)) .gt. L) .or. (abs(x_new(2)) .gt. L)) then
 					x_new(:) = x(:) - move(a,:)
 				end if
-
-				! reward is the sum of individual rewards 
-				rew = rew - (q(x_new) + collision(x_new))
-
+				
 				! save new state
 				state_new(i,:) = x_new
-				
+
+				! update occupation number
+				occ(x(1),x(2)) = occ(x(1),x(2)) - 1
+				occ(x_new(1),x_new(2)) = occ(x_new(1),x_new(2)) + 1
+
+			end do
+			
+			! calculate reward in the new state
+			rew = 0.
+			do i=1, Na
+				! reward is the sum of individual rewards 
+				rew = rew - ( q(state_new(i,:)) + collision(state_new(i,:)) )
 			end do
 
 			! initially set rewbar to rew
@@ -325,18 +332,16 @@ call MPI_Init ( ierr )
 			end if
 			avrew = rew/Na
 
-			
+
 			!
 			! Actor-critic algorithm
 			!
-			
+
 			! calculate the value estimates in the current and next states
 			v = 0
 			v_new = 0
 			do i=1, Na
-				x = state(i,:)
-				x_new = state_new(i,:)
-	
+
 				! value estimates of old and new states
 				! (features for the value are the occupation numbers)
 				v = v + w(state(i,1), state(i,2))
