@@ -16,7 +16,7 @@ module consts_funcs
 	real(dp), parameter :: Dt = .0001			! time discretization
 	real(dp), parameter :: R = 10.				! square domain (-R,R)x(-R,R)
 	integer, parameter :: L = ceiling(R/dx)		! lattice (-L,L)x(-L,L)
-	integer, parameter :: T	= int(50./dt)		! maximum time
+	integer, parameter :: T	= int(100./dt)		! maximum time
 	integer, parameter :: Trlx = int(30./dt)	! time for equilibration 
 	integer, parameter :: its = 1				! number of iterations
 
@@ -98,10 +98,11 @@ program eikonal2d
 	real(dp) :: r
 
 	! learning variables
-	real(dp) :: p(0:4), elgb(0:4)			! policy and eligibility
+	real(dp) :: p(0:4), glp(0:4)			! policy and eligibility
 	integer :: i, j, ii, jj, a, ts, it		! running indices
 	integer :: x(2), x_new(2)
 	integer, allocatable :: state(:,:), state_new(:,:) ! first index is the agent, second is the lattice position
+	integer, allocatable :: act(:), elgb(:)		! actions and eligibility vectors
 	integer :: occ(-L:L, -L:L), occ_new(-L:L, -L:L)	! occupation numbers in position space
 	real(dp) :: rho_av(-L:L, -L:L)		! density averaged over several steps
 
@@ -109,8 +110,8 @@ program eikonal2d
 	
 	real(dp) :: w(-L:L, -L:L), w_av(-L:L,-L:L) ! table with the value of the state
 	real(dp) :: v, v_new
-	integer :: act(0:4, 2)	! first index is the action, second is lattice displacement
-	real(dp) :: theta(-L:L, -L:L), dtheta(-L:L, -L:L)	! table of the parameter of the policy
+	integer :: move(0:4, 2)			! first index is the action, second is lattice displacement
+	real(dp) :: theta(-L:L, -L:L)	! table of the parameter of the policy
 	real(dp) :: drift_block(2)
 	integer :: blocksize = 2
 	real(dp) :: rew, rewbar, rewbar_new, avrew, delta
@@ -184,7 +185,7 @@ call MPI_Init ( ierr )
 	
 
 
-	allocate(state(Na,2), state_new(Na,2))
+	allocate(state(Na,2), state_new(Na,2), act(Na), elgb(Na))
 
 	!
 	!	Set the INPUT and OUTPUT files
@@ -197,11 +198,11 @@ call MPI_Init ( ierr )
 	call seed_from_urandom(seed)
 
 	! define the actions (displacements on the lattice)
-	act(0,:) = (/ 0, 0 /)	! stay in place
-	act(1,:) = (/ 0, 1 /)	! move UP
-	act(2,:) = (/ 1, 0 /)	! move RIGHT
-	act(3,:) = (/ 0, -1 /)	! move DOWN
-	act(4,:) = (/ -1, 0 /)	! move LEFT
+	move(0,:) = (/ 0, 0 /)	! stay in place
+	move(1,:) = (/ 0, 1 /)	! move UP
+	move(2,:) = (/ 1, 0 /)	! move RIGHT
+	move(3,:) = (/ 0, -1 /)	! move DOWN
+	move(4,:) = (/ -1, 0 /)	! move LEFT
 
 	! Initialization of occupation and visits matrices
 	occ_new = 0
@@ -283,10 +284,10 @@ call MPI_Init ( ierr )
 			end if
 
 			!
-			!	At each time step move particles according to current policy
+			!	Take the multi-agent action (each particle selects an action)
+			!	and observe the consequences (state and reward)
 			!
 			rew = 0.
-			dtheta = 0
 			do i=1, Na
 				
 				if ((mod(ts,int(.01/dt))==0).and.(i .le. Ntraj).and.(it==its)) then
@@ -295,29 +296,26 @@ call MPI_Init ( ierr )
 				
 				x = state(i,:)
 				p = policy(theta(x(1), x(2)))
-				elgb = grad_log_pi(theta(x(1), x(2)))
-	
-				! choose 'a' according to the policy
+				glp = grad_log_pi(theta(x(1), x(2)))
+				
+				! choose single-agent action according to the policy
 				call choose_action(a)
+
+				! store actions and corresponding eligibilities for each particle
+				act(i) = a
+				elgb(i) = glp(a)
 	
 				! take action: move in the opposite direction if going outside the domain
-				x_new(:) = x(:) + act(a,:)
+				x_new(:) = x(:) + move(a,:)
 				if ((abs(x_new(1)) .gt. L) .or. (abs(x_new(2)) .gt. L)) then
-					x_new(:) = x(:) - act(a,:)
+					x_new(:) = x(:) - move(a,:)
 				end if
 
-				! accumulate reward
+				! reward is the sum of individual rewards 
 				rew = rew - (q(x_new) + collision(x_new))
-
-				! accumulate differences for the policy parameters
-				dtheta(x(1), x(2)) = dtheta(x(1), x(2)) + elgb(a)
 
 				! save new state
 				state_new(i,:) = x_new
-
-				! update occupation matrix
-				occ_new(x(1), x(2)) = occ_new(x(1), x(2)) - 1
-				occ_new(x_new(1), x_new(2)) = occ_new(x_new(1), x_new(2)) + 1
 				
 			end do
 
@@ -327,30 +325,51 @@ call MPI_Init ( ierr )
 			end if
 			avrew = rew/Na
 
-			! value estimates of old and new states
-			! (features for the value are the occupation numbers)
-			v = sum(w*occ)
-			v_new = sum(w*occ_new)
+			
+			!
+			! Actor-critic algorithm
+			!
+			
+			! calculate the value estimates in the current and next states
+			v = 0
+			v_new = 0
+			do i=1, Na
+				x = state(i,:)
+				x_new = state_new(i,:)
+	
+				! value estimates of old and new states
+				! (features for the value are the occupation numbers)
+				v = v + w(state(i,1), state(i,2))
+				v_new = v_new + w(state_new(i,1), state_new(i,2))
 
-			! calculate the error
-			delta = (rew - rewbar + v_new - v)
+			end do
 
-			!write(99,"(6es16.6)") dt*ts, rew, rewbar, v_new, v, delta
+			! calculate the TD error
+			delta = rew - rewbar + v_new - v
 
-			! update policy parametes
-			theta = modulo(theta + alpha/(1.+(ts+1)**.3)*delta*dtheta, 2.*pi)
+			! update policy and value estimate
+			do i=1, Na
+			
+				! policy parametes (drift direction at each lattice point)
+				theta(state(i,1), state(i,2)) = theta(state(i,1), state(i,2)) &
+					+ alpha*delta/(1.+(ts*dt)**.5)*elgb(i)
+				
+				! value parameters (value of each lattice point)
+				w(state(i,1), state(i,2)) = w(state(i,1), state(i,2)) &
+					+ beta*delta/(1.+(ts*dt)**.5)
 
-			! update value parameters (value of each lattice point)
-			w = w + beta/(1.+(ts+1)**.6)*delta*occ
+			end do
+			do i=1, Na
+				theta(state(i,1), state(i,2)) = modulo( theta(state(i,1), state(i,2)), 2.*pi)
+			end do
 
-			! update baseline -- steady state reward rate
-			rewbar = rewbar + eta/(1.+(ts+1)**.6)*delta
+			! update number of visits (for scheduling)
+			do i=1, Na
+				visits(state_new(i,1), state_new(i,2)) = visits(state_new(i,1), state_new(i,2)) + 1
+			end do
 
-			! update number of visits per each lattice point
-			visits = visits + occ_new
-
-			! update occupation numbers (feature)
-			occ = occ_new
+			! update baseline -- steady state one-step reward
+			rewbar = rewbar + eta*delta/(1.+(ts*dt)**.6)
 
 			! update state
 			state = state_new
@@ -446,9 +465,10 @@ contains
 
 	subroutine choose_action (a)
 		integer :: a
+!		real(dp) :: cp
 
 		call random_number(r)
-			
+		
 		! choose action
 		if (r .lt. p(0)) then
 			a = 0 ! take action STAY
@@ -461,6 +481,12 @@ contains
 		else
 			a = 4 ! take action LEFT
 		end if
+
+!		do while (r >= cp)
+!			a = a + 1
+!			cp = cp + p(a)
+!		end do
+		
 	end subroutine choose_action
 
 
