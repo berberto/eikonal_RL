@@ -352,11 +352,11 @@ call MPI_Init ( ierr )
 			
 				! policy parametes (drift direction at each lattice point)
 				theta(state(i,1), state(i,2)) = theta(state(i,1), state(i,2)) &
-					+ alpha*delta/(1.+(ts*dt)**.5)*elgb(i)
+					+ alpha*delta/(1.+(visits(state(i,1), state(i,2)))**.5)*elgb(i)
 				
 				! value parameters (value of each lattice point)
 				w(state(i,1), state(i,2)) = w(state(i,1), state(i,2)) &
-					+ beta*delta/(1.+(ts*dt)**.5)
+					+ beta*delta/(1.+(visits(state(i,1), state(i,2)))**.6)
 
 			end do
 			do i=1, Na
@@ -380,7 +380,7 @@ call MPI_Init ( ierr )
 				w_av = w_av + 1./float((T-Trlx)/100)*w/Na
 			end if
 
-			!	Print the average reward per walker at some time steps
+			! Print the average reward per walker at some time steps
 			if (mod(ts,int(.01/dt))==0) then
 				write(out_cost,"(3es14.4)") ts*dt, rew/Na, rewbar/Na
 			end if
