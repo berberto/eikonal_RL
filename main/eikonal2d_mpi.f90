@@ -10,27 +10,27 @@ module consts_funcs
 	implicit none
 
 	real(dp), parameter :: k = 1.				! curvature harmonic potential
-	real(dp), parameter :: D = 1				! diffusion constant
-	real(dp), parameter :: U = 2.				! speed
+	real(dp), parameter :: D = .0001			! diffusion constant
+	real(dp), parameter :: U = .0002			! speed
 	real(dp), parameter :: Dx = .05				! lattice spacing
-	real(dp), parameter :: Dt = .0001			! time discretization
+	real(dp), parameter :: Dt = 1.				! time discretization
 	real(dp), parameter :: R = 10.				! square domain (-R,R)x(-R,R)
 	integer, parameter :: L = ceiling(R/dx)		! lattice (-L,L)x(-L,L)
-	integer, parameter :: T	= int(100./dt)		! maximum time
-	integer, parameter :: Trlx = int(30./dt)	! time for equilibration 
+	integer, parameter :: T	= int(2000./dt)		! maximum time
+	integer, parameter :: Trlx = int(500./dt)	! time for equilibration 
 	integer, parameter :: its = 1				! number of iterations
 
-	real(dp), parameter :: delta = U*Dt/Dx
+	real(dp), parameter :: eps = U*Dt/Dx
 	real(dp), parameter :: sigma = 2.*D*Dt/(Dx**2.)
 
-	private :: sigma, delta, R
+	private :: sigma, eps, R
 
 	public :: Dx, Dt, k, L, T, Trlx, U, D, its
 
 contains
 
 	subroutine check_params ()
-		if((sigma < delta).or.(sigma > .5)) then
+		if((sigma < eps).or.(sigma > .5)) then
 			print *, "Check parameters, Dx and Dt"
 			call exit(1)
 		end if
@@ -43,10 +43,10 @@ contains
 		real(dp) :: policy(0:4)
 
 		policy(0) = 1.- 2.*sigma
-		policy(1) = .5*(sigma + delta*sin(theta))
-		policy(2) = .5*(sigma + delta*cos(theta))
-		policy(3) = .5*(sigma - delta*sin(theta))
-		policy(4) = .5*(sigma - delta*cos(theta))
+		policy(1) = sigma + eps*sin(theta)
+		policy(2) = sigma + eps*cos(theta)
+		policy(3) = sigma - eps*sin(theta)
+		policy(4) = sigma - eps*cos(theta)
 	end function policy
 
 
@@ -56,10 +56,10 @@ contains
 		real(dp) :: grad_log_pi(0:4)
 
 		grad_log_pi(0) = 0.
-		grad_log_pi(1) = delta*cos(theta)/(sigma + delta*sin(theta))
-		grad_log_pi(2) = -delta*sin(theta)/(sigma + delta*cos(theta))
-		grad_log_pi(3) = -delta*cos(theta)/(sigma - delta*sin(theta))
-		grad_log_pi(4) = delta*sin(theta)/(sigma - delta*cos(theta))
+		grad_log_pi(1) = eps*cos(theta)/(sigma + eps*sin(theta))
+		grad_log_pi(2) = -eps*sin(theta)/(sigma + eps*cos(theta))
+		grad_log_pi(3) = -eps*cos(theta)/(sigma - eps*sin(theta))
+		grad_log_pi(4) = eps*sin(theta)/(sigma - eps*cos(theta))
 		
 	end function grad_log_pi
 
@@ -322,8 +322,9 @@ call MPI_Init ( ierr )
 			! calculate reward in the new state
 			rew = 0.
 			do i=1, Na
+				x_new = state_new(i,:)
 				! reward is the sum of individual rewards 
-				rew = rew - ( q(state_new(i,:)) + collision(state_new(i,:)) )
+				rew = rew - ( q(x_new) + collision(x_new) )
 			end do
 
 			! initially set rewbar to rew
@@ -361,11 +362,11 @@ call MPI_Init ( ierr )
 				
 				! value parameters (value of each lattice point)
 				w(state(i,1), state(i,2)) = w(state(i,1), state(i,2)) &
-					+ beta*delta/(1.+(visits(state(i,1), state(i,2)))**.6)
+					+ beta*delta/(1.+(visits(state(i,1), state(i,2)))**.7)
 
 			end do
 			do i=1, Na
-				theta(state(i,1), state(i,2)) = modulo( theta(state(i,1), state(i,2)), 2.*pi)
+				theta(state(i,1), state(i,2)) = modulo( theta(state(i,1), state(i,2)), 2.*pi )
 			end do
 
 			! update number of visits (for scheduling)
@@ -374,7 +375,7 @@ call MPI_Init ( ierr )
 			end do
 
 			! update baseline -- steady state one-step reward
-			rewbar = rewbar + eta*delta/(1.+(ts*dt)**.6)
+			rewbar = rewbar + eta*delta/(1.+(ts*dt))
 
 			! update state
 			state = state_new
