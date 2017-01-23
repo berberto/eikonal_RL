@@ -6,7 +6,7 @@ module consts_funcs
 	use kinds, only: dp
 	use constants
 	use mpi
-	
+
 	implicit none
 
 	real(dp), parameter :: k = 1.				! curvature harmonic potential
@@ -15,9 +15,9 @@ module consts_funcs
 	real(dp), parameter :: Dx = .05				! lattice spacing
 	real(dp), parameter :: Dt = 1.				! time discretization
 	real(dp), parameter :: R = 10.				! square domain (-R,R)x(-R,R)
-	integer, parameter :: L = ceiling(R/dx)		! lattice (-L,L)x(-L,L)
-	integer, parameter :: T	= int(2000./dt)		! maximum time
-	integer, parameter :: Trlx = int(500./dt)	! time for equilibration 
+	integer, parameter :: L = ceiling(R/dx)			! lattice (-L,L)x(-L,L)
+	integer, parameter :: T	= int(200000./dt)		! maximum time
+	integer, parameter :: Trlx = int(50000./dt)		! time for equilibration
 	integer, parameter :: its = 1				! number of iterations
 
 	real(dp), parameter :: eps = U*Dt/Dx
@@ -42,11 +42,11 @@ contains
 		real(dp) :: theta
 		real(dp) :: policy(0:4)
 
-		policy(0) = 1.- 2.*sigma
-		policy(1) = sigma + eps*sin(theta)
-		policy(2) = sigma + eps*cos(theta)
-		policy(3) = sigma - eps*sin(theta)
-		policy(4) = sigma - eps*cos(theta)
+		policy(0) = 1.- 2.*sigma	   ! STAY
+		policy(1) = sigma + eps*sin(theta) ! UP
+		policy(2) = sigma + eps*cos(theta) ! RIGHT
+		policy(3) = sigma - eps*sin(theta) ! DOWN
+		policy(4) = sigma - eps*cos(theta) ! LEFT
 	end function policy
 
 
@@ -60,7 +60,7 @@ contains
 		grad_log_pi(2) = -eps*sin(theta)/(sigma + eps*cos(theta))
 		grad_log_pi(3) = -eps*cos(theta)/(sigma - eps*sin(theta))
 		grad_log_pi(4) = eps*sin(theta)/(sigma - eps*cos(theta))
-		
+
 	end function grad_log_pi
 
 
@@ -76,16 +76,16 @@ program eikonal2d
 	use kinds, only: dp
 	use constants, only: pi
 	use string_extras
-	
+
 	use randomf
 	use consts_funcs
-	
+
 	implicit none
 
 	! MPI variables
 	integer :: proc, Nproc
 	integer :: ierr, error
-	
+
 	! command line inputs
 	character(len=32) :: arg
 	integer :: Na						! number of agents
@@ -107,7 +107,7 @@ program eikonal2d
 	real(dp) :: rho_av(-L:L, -L:L)		! density averaged over several steps
 
 	integer :: visits(-L:L, -L:L)		! counting of visits at a lattice point
-	
+
 	real(dp) :: w(-L:L, -L:L), w_av(-L:L,-L:L) ! table with the value of the state
 	real(dp) :: v, v_new
 	integer :: move(0:4, 2)			! first index is the action, second is lattice displacement
@@ -118,7 +118,7 @@ program eikonal2d
 	real(dp) :: radial_rho(0:L), radial_val(0:L)
 
 	real(dp) :: r1(2)
-	
+
 	! input
 	integer :: in_states=151, in_vt=152, states_error=153, vt_error=154
 	character(len=62) :: in_name_states, in_name_vt
@@ -138,7 +138,7 @@ program eikonal2d
 
 	!
 	!	Parameters from command line
-	! 
+	!
 	if ((iargc() > 24) .or. (iargc() < 4)) then
 		print *, "Input"
 		print *, "1      -> number of agents"
@@ -146,14 +146,14 @@ program eikonal2d
 		print *, "5(-24) -> array with values of the interaction strength"
 		call exit (1)
 	end if
-	
+
 	call getarg(1,arg)
 	read(arg,*) Na
-	
+
 !	alpha = 70./Na ! .07
 	call getarg(2,arg)
 	read(arg,*) alpha
-	
+
 !	beta = 100./Na ! .1
 	call getarg(3,arg)
 	read(arg,*) beta
@@ -182,7 +182,7 @@ call MPI_Init ( ierr )
 
 	! # of process labels the value of g used in the simulation
 	g = gvals(proc)
-	
+
 
 
 	allocate(state(Na,2), state_new(Na,2), act(Na), elgb(Na))
@@ -193,7 +193,7 @@ call MPI_Init ( ierr )
 	call set_IO ()
 
 	write(100+proc,fmt="(a, i2, a, f7.4, a)") "Process ", proc, ", g = ", g, " --> started..."
-	
+
 	! inizialize random number generator
 	call seed_from_urandom(seed)
 
@@ -213,10 +213,10 @@ call MPI_Init ( ierr )
 	w_av = 0.
 
 	! Initialization VALUE function
-	w = 0.	
+	w = 0.
 	rewbar = 0.
 	rewbar_new = 0.
-	
+
 	!
 	!	INITIALIZATION OF STATES AND POLICY
 	!
@@ -266,7 +266,6 @@ call MPI_Init ( ierr )
 	close(in_vt)
 	occ = occ_new
 
-
 	!
 	!	START THE LEARNING
 	!
@@ -275,11 +274,11 @@ call MPI_Init ( ierr )
 	do it=1, its
 		write(100+proc,fmt="(a, f7.4, a, i2)") "... g = ", g, ",  iteration ", it
 		do ts=0, T
-	
+
 			!
 			!	SNAPSHOTS every 10 time units
 			!
-			if (mod(ts,int(10/dt))==0) then
+			if (mod(ts,int(1000/dt))==0) then
 				call snapshot()
 			end if
 
@@ -288,28 +287,34 @@ call MPI_Init ( ierr )
 			!	and observe the new state
 			!
 			do i=1, Na
-				
-				if ((mod(ts,int(.01/dt))==0).and.(i .le. Ntraj).and.(it==its)) then
+
+!				if (mod(ts,int(10/dt))==0) then
+!					print *, "Fin qui?!"
+!					call MPI_Finalize(ierr)
+!					stop
+!				end if
+				if ((mod(ts,int(10/dt))==0).and.(i .le. Ntraj).and.(it==its)) then
 					write(out_traj(i),"(3es14.4)") ts*dt, dx*state(i,:)
 				end if
-				
+
+
 				x = state(i,:)
 				p = policy(theta(x(1), x(2)))
 				glp = grad_log_pi(theta(x(1), x(2)))
-				
+
 				! choose single-agent action according to the policy
 				call choose_action(a)
 
 				! store actions and corresponding eligibilities for each particle
 				act(i) = a
 				elgb(i) = glp(a)
-	
+
 				! take action: move in the opposite direction if going outside the domain
 				x_new(:) = x(:) + move(a,:)
 				if ((abs(x_new(1)) .gt. L) .or. (abs(x_new(2)) .gt. L)) then
 					x_new(:) = x(:) - move(a,:)
 				end if
-				
+
 				! save new state
 				state_new(i,:) = x_new
 
@@ -318,12 +323,12 @@ call MPI_Init ( ierr )
 				occ(x_new(1),x_new(2)) = occ(x_new(1),x_new(2)) + 1
 
 			end do
-			
+
 			! calculate reward in the new state
 			rew = 0.
 			do i=1, Na
 				x_new = state_new(i,:)
-				! reward is the sum of individual rewards 
+				! reward is the sum of individual rewards
 				rew = rew - ( q(x_new) + collision(x_new) )
 			end do
 
@@ -355,11 +360,11 @@ call MPI_Init ( ierr )
 
 			! update policy and value estimate
 			do i=1, Na
-			
+
 				! policy parametes (drift direction at each lattice point)
 				theta(state(i,1), state(i,2)) = theta(state(i,1), state(i,2)) &
 					+ alpha*delta/(1.+(visits(state(i,1), state(i,2)))**.5)*elgb(i)
-				
+
 				! value parameters (value of each lattice point)
 				w(state(i,1), state(i,2)) = w(state(i,1), state(i,2)) &
 					+ beta*delta/(1.+(visits(state(i,1), state(i,2)))**.7)
@@ -379,7 +384,7 @@ call MPI_Init ( ierr )
 
 			! update state
 			state = state_new
-	
+
 			! after Trlx relaxation steps, sample the empirical density every 100 steps
 			if ((ts > Trlx).and.(mod(ts-Trlx, 100).eq.1).and.(it == its)) then
 				rho_av = rho_av + 1./float((T-Trlx)/100)*(occ/(Na*dx**2.))
@@ -387,10 +392,10 @@ call MPI_Init ( ierr )
 			end if
 
 			! Print the average reward per walker at some time steps
-			if (mod(ts,int(.01/dt))==0) then
+			if (mod(ts,int(20/dt))==0) then
 				write(out_cost,"(3es14.4)") ts*dt, rew/Na, rewbar/Na
 			end if
-	
+
 		end do
 		write(out_cost,*) ''
 		write(out_cost,*) ''
@@ -412,7 +417,7 @@ call MPI_Init ( ierr )
 		end do
 		close(in_states)
 		close(in_vt)
-				
+
 	end do
 	! ---------------------- end of the learning -------------------------------
 
@@ -429,11 +434,11 @@ call MPI_Init ( ierr )
 		write(out_rho_av,*) ''
 	end do
 	radial_rho = axis_average_1s(rho_av)	! radial_average(rho_av)
-	radial_val = axis_average_1s(w_av)		! radial_average(w_av)
+	radial_val = axis_average_1s(w_av)	! radial_average(w_av)
 	do i=0, L
 		write(out_radial,"(3es14.4)") i*dx, radial_rho(i), radial_val(i)
 	end do
-	
+
 	do i=1, Ntraj
 		close(out_traj(i))
 	end do
@@ -454,8 +459,8 @@ contains
 		implicit none
 		integer, intent(in) :: x(2)
 		real(dp) :: q
-		
-		q = .5*k*(x(1)**2. + x(2)**2.)*(Dx**2.)
+
+		q = .5*k*((x(1)-.5)**2. + (x(2)-.5)**2.)*(Dx**2.)
 	end function q
 
 	! cost for collisions
@@ -474,25 +479,20 @@ contains
 !		real(dp) :: cp
 
 		call random_number(r)
-		
+
 		! choose action
 		if (r .lt. p(0)) then
-			a = 0 ! take action STAY
+			a = 0 ! STAY
 		else if (r .lt. sum(p(0:1))) then
-			a = 1 ! take action UP
+			a = 1 ! UP
 		else if (r .lt. sum(p(0:2))) then
-			a = 2 ! take action RIGHT
+			a = 2 ! RIGHT
 		else if (r .lt. sum(p(0:3))) then
-			a = 3 ! take action DOWN
+			a = 3 ! DOWN
 		else
-			a = 4 ! take action LEFT
+			a = 4 ! LEFT
 		end if
 
-!		do while (r >= cp)
-!			a = a + 1
-!			cp = cp + p(a)
-!		end do
-		
 	end subroutine choose_action
 
 
@@ -549,17 +549,17 @@ contains
 		write(out_name, out_form) "output/stdout_", 100+proc, "_N_", 1.*Na/(10**int(log10(1.*Na))) , "e", int(log10(1.*Na))
 		print *, proc, "   ", trim(adjustl(out_name))
 		open(100+proc, file=trim(adjustl(out_name)), action="write", status="replace")
-	
+
 		! create/clean output directories
 		out_form = "(a, f4.2, a3, f3.1, a1, i1, a3, f6.4)"
 		write(out_dir,out_form) "output/typlen_", d/U, &
 								"/N_", 1.*Na/(10**int(log10(1.*Na))) , "e", int(log10(1.*Na)), &
 								"/g_", g
-	
+
 		! backup old files
 		call system("for i in $(ls "//trim(adjustl(out_dir))//"/*.dat); do mv -f $i $i'~'; rm -f $i; done")
 		call system("for i in $(ls "//trim(adjustl(out_dir))//"/trajs/*.dat); do mv -f $i $i'~'; rm -f $i; done")
-		
+
 		! create directory and open files for the first Ntraj trajectories
 		out_form = "(a, a5)"
 		write(mk_dir,out_form) trim(adjustl(out_dir)) // "/trajs"
@@ -570,18 +570,18 @@ contains
 			call replace_blanks(out_name,'0')
 			open(unit=out_traj(i), file=trim(adjustl(out_name)), action="write", status="replace")
 		end do
-		
+
 		! open file for the average cost
 		out_form = "(a, f5.3, a4 )"
 		write(out_name,out_form) trim(adjustl(out_dir)) // "/avg_cost_dx", dx, ".dat"
 		call replace_blanks(out_name,'0')
 		open(unit=out_cost, file=trim(adjustl(out_name)), action="write", status="replace")
-		
+
 		! open file for the drift field
 		write(out_name,out_form) trim(adjustl(out_dir)) // "/drift_dx", dx,".dat"
 		call replace_blanks(out_name,'0')
 		open(unit=out_theta, file=trim(adjustl(out_name)), action="write", status="replace")
-		
+
 		! open file for the density and value on the lattice ..
 		write(out_name,out_form) trim(adjustl(out_dir)) // "/rho_value_dx", dx, ".dat"
 		call replace_blanks(out_name,'0')
@@ -590,12 +590,12 @@ contains
 		write(out_name,out_form) trim(adjustl(out_dir)) // "/radial_rho_value_dx", dx, ".dat"
 		call replace_blanks(out_name,'0')
 		open(unit=out_radial, file=trim(adjustl(out_name)), action="write", status="replace")
-		
+
 		! open file for the empirical density
 		write(out_name,*) trim(adjustl(out_dir)) // "/rho_av.dat"
 		open(unit=out_rho_av, file=trim(adjustl(out_name)), action="write", status="replace")
-	
-	
+
+
 		!
 		!	INPUT
 		!
@@ -654,6 +654,6 @@ contains
 		end do
 		write(out_radial,*) ''
 		write(out_radial,*) ''
-	end subroutine snapshot 
+	end subroutine snapshot
 
 end program eikonal2d
