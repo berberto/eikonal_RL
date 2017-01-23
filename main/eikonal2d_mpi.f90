@@ -42,7 +42,7 @@ contains
 		real(dp) :: theta
 		real(dp) :: policy(0:4)
 
-		policy(0) = 1.- 2.*sigma	   ! STAY
+		policy(0) = 1.- 4.*sigma	   ! STAY
 		policy(1) = sigma + eps*sin(theta) ! UP
 		policy(2) = sigma + eps*cos(theta) ! RIGHT
 		policy(3) = sigma - eps*sin(theta) ! DOWN
