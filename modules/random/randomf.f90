@@ -8,9 +8,8 @@ contains
 
 	subroutine seed_from_urandom(i)
 	    implicit none
-	    integer :: n,k
+	    integer :: n
 	    integer(4), intent(out), allocatable :: i(:)
-	    real(dp) :: r
 
 		call random_seed(size=n)
 	    allocate(i(n))
