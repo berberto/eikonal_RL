@@ -1,5 +1,5 @@
 !
-!   Module with constants and functions
+!    Module with constants and functions
 !
 module consts_funcs
 
@@ -9,16 +9,17 @@ module consts_funcs
 
     implicit none
 
-    real(dp), parameter :: k = 1.               ! curvature harmonic potential
-    real(dp), parameter :: D = .0001            ! diffusion constant
-    real(dp), parameter :: U = .0002            ! speed
-    real(dp), parameter :: Dx = .05             ! lattice spacing
-    real(dp), parameter :: Dt = 1.              ! time discretization
-    real(dp), parameter :: R = 10.              ! square domain (-R,R)x(-R,R)
-    integer, parameter :: L = ceiling(R/dx)         ! lattice (-L,L)x(-L,L)
-    integer, parameter :: T = int(200000./dt)       ! maximum time
-    integer, parameter :: Trlx = int(50000./dt)     ! time for equilibration
-    integer, parameter :: its = 1               ! number of iterations
+    real(dp), parameter :: k = 1.                ! curvature harmonic potential
+    real(dp), parameter :: D = .0001             ! diffusion constant
+    real(dp), parameter :: U = .0002             ! speed
+    real(dp), parameter :: Dx = .05              ! lattice spacing
+    real(dp), parameter :: Dt = 1.               ! time discretization
+    real(dp), parameter :: R = 10.               ! square domain (-R,R)x(-R,R)
+    integer, parameter :: L = ceiling(R/dx)      ! lattice (-L,L)x(-L,L)
+    integer, parameter :: T    = int(1000000./dt)! time steps per iteration
+    integer, parameter :: Trlx = int(200000./dt) ! time steps for equilibration
+    integer, parameter :: Tsave = int(T/10)      ! time steps between snapshots
+    integer, parameter :: its = 1                ! number of iterations
 
     real(dp), parameter :: eps = U*Dt/Dx
     real(dp), parameter :: sigma = 2.*D*Dt/(Dx**2.)
@@ -47,7 +48,6 @@ contains
         policy(2) = sigma + eps*cos(theta) ! RIGHT
         policy(3) = sigma - eps*sin(theta) ! DOWN
         policy(4) = sigma - eps*cos(theta) ! LEFT
-
     end function policy
 
 
@@ -70,7 +70,7 @@ end module consts_funcs
 
 
 !
-!   MAIN PROGRAM
+!    MAIN PROGRAM
 !
 program eikonal2d
 
@@ -89,9 +89,9 @@ program eikonal2d
 
     ! command line inputs
     character(len=32) :: arg
-    integer :: Na                       ! number of agents
-    real(dp) :: g                       ! coupling strength
-    real(dp) :: alpha, beta, eta        ! learning rates
+    integer :: Na                        ! number of agents
+    real(dp) :: g                        ! coupling strength
+    real(dp) :: alpha, beta, eta         ! learning rates
     real(dp) :: gvals(0:19)
 
     ! random number
@@ -99,18 +99,18 @@ program eikonal2d
     real(dp) :: r
 
     ! learning variables
-    real(dp) :: p(0:4), glp(0:4)            ! policy and eligibility
-    integer :: i, j, ii, jj, a, ts, it      ! running indices
-    integer :: x(2), x_new(2)
+    real(dp) :: p(0:4), glp(0:4)              ! policy and eligibility
+    integer :: i, j, ii, jj, a, ts, it        ! running indices
+    integer :: x(2), x_new(2)                 ! temporary arrays for single-agent states
     integer, allocatable :: state(:,:), state_new(:,:) ! first index is the agent, second is the lattice position
-    integer, allocatable :: act(:), elgb(:)     ! actions and eligibility vectors
-    integer :: occ(-L:L, -L:L), occ_new(-L:L, -L:L) ! occupation numbers in position space
-    real(dp) :: rho_av(-L:L, -L:L)      ! density averaged over several steps
+    integer, allocatable :: act(:), elgb(:)            ! actions and eligibility vectors
+    integer :: occ(-L:L, -L:L), occ_new(-L:L, -L:L)    ! occupation numbers in position space
+    real(dp) :: rho_av(-L:L, -L:L)                     ! density averaged over several steps
 
-    integer :: visits(-L:L, -L:L)       ! counting of visits at a lattice point
+    integer :: visits(-L:L, -L:L)                      ! counting of visits at a lattice point
 
-    real(dp) :: w(-L:L, -L:L), w_av(-L:L,-L:L) ! table with the value of the state
-    real(dp) :: v, v_new
+    real(dp) :: w(-L:L, -L:L), w_av(-L:L,-L:L)         ! table with the value of the state
+    real(dp) :: v, v_new            ! value of current and old state
     integer :: move(0:4, 2)         ! first index is the action, second is lattice displacement
     real(dp) :: theta(-L:L, -L:L)   ! table of the parameter of the policy
     real(dp) :: drift_block(2)
@@ -138,7 +138,7 @@ program eikonal2d
     call check_params
 
     !
-    !   Parameters from command line
+    !    Parameters from command line
     !
     if ((iargc() > 24) .or. (iargc() < 4)) then
         print *, "Input"
@@ -151,15 +151,12 @@ program eikonal2d
     call getarg(1,arg)
     read(arg,*) Na
 
-!   alpha = 70./Na ! .07
     call getarg(2,arg)
     read(arg,*) alpha
 
-!   beta = 100./Na ! .1
     call getarg(3,arg)
     read(arg,*) beta
 
-!   eta = 10./Na ! .01
     call getarg(4,arg)
     read(arg,*) eta
 
@@ -167,9 +164,9 @@ program eikonal2d
         call getarg(i+5,arg)
         read(arg,*) gvals(i)
     end do
-
+    
     !
-    !   Initialize MPI environment
+    !    Initialize MPI environment
     !
 call MPI_Init ( ierr )
     call MPI_Comm_size(MPI_COMM_WORLD, Nproc, error)
@@ -189,7 +186,7 @@ call MPI_Init ( ierr )
     allocate(state(Na,2), state_new(Na,2), act(Na), elgb(Na))
 
     !
-    !   Set the INPUT and OUTPUT files
+    !    Set the INPUT and OUTPUT files
     !
     call set_IO ()
 
@@ -199,11 +196,11 @@ call MPI_Init ( ierr )
     call seed_from_urandom(seed)
 
     ! define the actions (displacements on the lattice)
-    move(0,:) = (/ 0, 0 /)  ! stay in place
-    move(1,:) = (/ 0, 1 /)  ! move UP
-    move(2,:) = (/ 1, 0 /)  ! move RIGHT
-    move(3,:) = (/ 0, -1 /) ! move DOWN
-    move(4,:) = (/ -1, 0 /) ! move LEFT
+    move(0,:) = (/ 0, 0 /)    ! STAY in place
+    move(1,:) = (/ 0, 1 /)    ! move UP
+    move(2,:) = (/ 1, 0 /)    ! move RIGHT
+    move(3,:) = (/ 0, -1 /)   ! move DOWN
+    move(4,:) = (/ -1, 0 /)   ! move LEFT
 
     ! Initialization of occupation and visits matrices
     occ_new = 0
@@ -219,7 +216,7 @@ call MPI_Init ( ierr )
     rewbar_new = 0.
 
     !
-    !   INITIALIZATION OF STATES AND POLICY
+    !    INITIALIZATION OF STATES AND POLICY
     !
     ! --------------------------------------------------------------------------
     if ((states_error == 0).and.(vt_error == 0)) then
@@ -240,12 +237,12 @@ call MPI_Init ( ierr )
             state(i,:) = (/ random_integer(-L,L), random_integer(-L,L) /)
         end do
         ! random initialization of the policy parameters
-!       do i=-L, L
-!           do j=-L, L
-!               call random_number(r)
-!               theta(i,j) = 2.*pi*r
-!           end do
-!       end do
+!        do i=-L, L
+!            do j=-L, L
+!                call random_number(r)
+!                theta(i,j) = 2.*pi*r
+!            end do
+!        end do
 
         ! central drift -- for policy evaluation
         do i=-L, L
@@ -268,7 +265,7 @@ call MPI_Init ( ierr )
     occ = occ_new
 
     !
-    !   START THE LEARNING
+    !    START THE LEARNING
     !
     ! --------------------------------------------------------------------------
     ! Take T steps for each iteration, for its iterations
@@ -277,23 +274,23 @@ call MPI_Init ( ierr )
         do ts=0, T
 
             !
-            !   SNAPSHOTS every 10 time units
+            !    SNAPSHOTS every 10 time units
             !
-            if (mod(ts,int(1000/dt))==0) then
+            if (mod(ts,Tsave)==0) then
                 call snapshot()
             end if
 
             !
-            !   Take the multi-agent action (each particle selects an action)
-            !   and observe the new state
+            !    Take the multi-agent action (each particle selects an action)
+            !    and observe the new state
             !
             do i=1, Na
 
-!               if (mod(ts,int(10/dt))==0) then
-!                   print *, "Fin qui?!"
-!                   call MPI_Finalize(ierr)
-!                   stop
-!               end if
+!                if (mod(ts,int(10/dt))==0) then
+!                    print *, "Fin qui?!"
+!                    call MPI_Finalize(ierr)
+!                    stop
+!                end if
                 if ((mod(ts,int(10/dt))==0).and.(i .le. Ntraj).and.(it==its)) then
                     write(out_traj(i),"(3es14.4)") ts*dt, dx*state(i,:)
                 end if
@@ -345,15 +342,15 @@ call MPI_Init ( ierr )
             !
 
             ! calculate the value estimates in the current and next states
+            ! BE CAREFUL: both v and v_new calculated from scratch with updated parameters w
             v = 0
             v_new = 0
             do i=1, Na
 
                 ! value estimates of old and new states
                 ! (features for the value are the occupation numbers)
-                v = v + w(state(i,1), state(i,2))
-                v_new = v_new + w(state_new(i,1), state_new(i,2))
-
+                v = v + w(state(i,1), state(i,2))                  ! v = sum(w*occ)
+                v_new = v_new + w(state_new(i,1), state_new(i,2))  ! v_new = sum(w*occ_new)
             end do
 
             ! calculate the TD error
@@ -364,11 +361,11 @@ call MPI_Init ( ierr )
 
                 ! policy parametes (drift direction at each lattice point)
                 theta(state(i,1), state(i,2)) = theta(state(i,1), state(i,2)) &
-                    + alpha*delta/(1.+(visits(state(i,1), state(i,2)))**.5)*elgb(i)
+                    + alpha*delta/(1.+(visits(state(i,1), state(i,2)))**.3)*elgb(i)
 
                 ! value parameters (value of each lattice point)
                 w(state(i,1), state(i,2)) = w(state(i,1), state(i,2)) &
-                    + beta*delta/(1.+(visits(state(i,1), state(i,2)))**.7)
+                    + beta*delta/(1.+(visits(state(i,1), state(i,2)))**.5)
 
             end do
             do i=1, Na
@@ -381,7 +378,7 @@ call MPI_Init ( ierr )
             end do
 
             ! update baseline -- steady state one-step reward
-            rewbar = rewbar + eta*delta/(1.+(ts*dt))
+            rewbar = rewbar + eta*delta/(1.+.1*(ts*dt))
 
             ! update state
             state = state_new
@@ -424,7 +421,7 @@ call MPI_Init ( ierr )
 
 
     !
-    !   PRINT FINAL RESULTS
+    !    PRINT FINAL RESULTS
     !
     ! --------------------------------------------------------------------------
     ! print the average density and value (averaged over last T-Trlx --every 100-- steps)
@@ -435,7 +432,7 @@ call MPI_Init ( ierr )
         write(out_rho_av,*) ''
     end do
     radial_rho = axis_average_1s(rho_av)    ! radial_average(rho_av)
-    radial_val = axis_average_1s(w_av)  ! radial_average(w_av)
+    radial_val = axis_average_1s(w_av)    ! radial_average(w_av)
     do i=0, L
         write(out_radial,"(3es14.4)") i*dx, radial_rho(i), radial_val(i)
     end do
@@ -469,15 +466,15 @@ contains
         implicit none
         integer, intent(in) :: x(2)
         real(dp) :: collision
-!       integer :: pairs
-!       pairs = occ(x(1),x(2))*(occ(x(1),x(2)) - 1)
+!        integer :: pairs
+!        pairs = occ(x(1),x(2))*(occ(x(1),x(2)) - 1)
         collision = .5*g*(occ(x(1),x(2))-1) ! *(Na-1)*dx**2.
     end function collision
 
 
     subroutine choose_action (a)
         integer :: a
-!       real(dp) :: cp
+!        real(dp) :: cp
 
         call random_number(r)
 
@@ -497,26 +494,26 @@ contains
     end subroutine choose_action
 
 
-!   function radial_average (f)
-!       real(dp) :: f(-L:L,-L:L)
-!       real(dp) :: radial_average(0:L)
-!       integer :: counter(0:L)
-!       integer :: i, j, ind
-!       counter = 0
-!       radial_average = 0
-!       do j=-L, L
-!           do i=-L, L
-!               ind = int(sqrt(i**2. + j**2.))
-!               if (ind <= L) then
-!                   counter(ind) = counter(ind) + 1
-!                   radial_average(ind) = radial_average(ind) + f(i,j)
-!               end if
-!           end do
-!       end do
-!       do i=0, L
-!           radial_average(i) = radial_average(i)/counter(i)
-!       end do
-!   end function radial_average
+!    function radial_average (f)
+!        real(dp) :: f(-L:L,-L:L)
+!        real(dp) :: radial_average(0:L)
+!        integer :: counter(0:L)
+!        integer :: i, j, ind
+!        counter = 0
+!        radial_average = 0
+!        do j=-L, L
+!            do i=-L, L
+!                ind = int(sqrt(i**2. + j**2.))
+!                if (ind <= L) then
+!                    counter(ind) = counter(ind) + 1
+!                    radial_average(ind) = radial_average(ind) + f(i,j)
+!                end if
+!            end do
+!        end do
+!        do i=0, L
+!            radial_average(i) = radial_average(i)/counter(i)
+!        end do
+!    end function radial_average
 
 
     function axis_average (f)
@@ -543,7 +540,7 @@ contains
 
     subroutine set_IO ()
         !
-        !   OUTPUTS
+        !    OUTPUTS
         !
         ! standard output
         out_form = "(a, i3, a3, f3.1, a1, i1,a1,i3)"
@@ -587,7 +584,7 @@ contains
         write(out_name,out_form) trim(adjustl(out_dir)) // "/rho_value_dx", dx, ".dat"
         call replace_blanks(out_name,'0')
         open(unit=out_rho_value, file=trim(adjustl(out_name)), action="write", status="replace")
-        ! .. and as radial average
+        ! .. and their radial average
         write(out_name,out_form) trim(adjustl(out_dir)) // "/radial_rho_value_dx", dx, ".dat"
         call replace_blanks(out_name,'0')
         open(unit=out_radial, file=trim(adjustl(out_name)), action="write", status="replace")

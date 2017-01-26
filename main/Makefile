@@ -18,9 +18,8 @@ SHELL=/bin/bash
 
 #############################  Fortran programs  ###############################
 
-MAIN = eikonal2d_mpi
+MAIN = eikonal2d_mpi  eikonal2d_pe
 #theta_diffs
-#eikonal2d_pe
 #short_corridor
 
 GLOBAL = kind constants
