@@ -16,10 +16,10 @@ module consts_funcs
     real(dp), parameter :: Dt = 1.               ! time discretization
     real(dp), parameter :: R = 10.               ! square domain (-R,R)x(-R,R)
     integer, parameter :: L = ceiling(R/dx)      ! lattice (-L,L)x(-L,L)
-    integer, parameter :: T    = int(30000./dt)! time steps per iteration
+    integer, parameter :: T    = int(60000./dt)! time steps per iteration
 
-    real(dp), parameter :: eps = U*Dt/Dx
-    real(dp), parameter :: sigma = 2.*D*Dt/(Dx**2.)
+    real(dp), parameter :: eps = .5*U*Dt/Dx
+    real(dp), parameter :: sigma = D*Dt/(Dx**2.)
 
     private :: sigma, eps, R
 
@@ -114,9 +114,10 @@ call MPI_Init ( ierr )
     call MPI_Comm_rank(MPI_COMM_WORLD, proc, error)
 
     if((Nproc > 20).and.(proc .eq. 0)) then
-        print *, "Run with maximum 20 processors:"
-        print *, "  mpirun -np <#proc> ./eikonal <#agents (parallel runs)>"
-        call exit(1)
+        print *, "WARNING: Running on more than 20 cores..."
+!        print *, "Run with maximum 20 processors:"
+!        print *, "  mpirun -np <#proc> ./eikonal <#agents (parallel runs)>"
+!        call exit(1)
     end if
 
     out_val = 100+proc

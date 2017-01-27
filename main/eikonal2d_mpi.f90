@@ -21,8 +21,8 @@ module consts_funcs
     integer, parameter :: Tsave = int(T/10)      ! time steps between snapshots
     integer, parameter :: its = 1                ! number of iterations
 
-    real(dp), parameter :: eps = U*Dt/Dx
-    real(dp), parameter :: sigma = 2.*D*Dt/(Dx**2.)
+    real(dp), parameter :: eps = .5*U*Dt/Dx
+    real(dp), parameter :: sigma = D*Dt/(Dx**2.)
 
     private :: sigma, eps, R
 
