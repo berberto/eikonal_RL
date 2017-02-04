@@ -16,8 +16,8 @@ module consts_funcs
     real(dp), parameter :: Dt = 1.               ! time discretization
     real(dp), parameter :: R = 10.               ! square domain (-R,R)x(-R,R)
     integer, parameter :: L = ceiling(R/dx)      ! lattice (-L,L)x(-L,L)
-    integer, parameter :: T    = int(1000000./dt)! time steps per iteration
-    integer, parameter :: Trlx = int(200000./dt) ! time steps for equilibration
+    integer, parameter :: T    = int(5.e8/dt)    ! time steps per iteration
+    integer, parameter :: Trlx = int(2.e6/dt)    ! time steps for equilibration
     integer, parameter :: Tsave = int(T/10)      ! time steps between snapshots
     integer, parameter :: its = 1                ! number of iterations
 
@@ -127,7 +127,7 @@ program eikonal2d
     ! output
     integer, parameter :: Ntraj = 100
     integer :: out_traj(Ntraj) = 1000, out_cost=2001, out_theta=2002, &
-            out_rho_value=2003, out_rho_av=2004, out_radial=2005
+            out_rho_value=2003, out_rho_av=2004, out_rho_av_rad=2005, out_radial=2006
     character(len=64) :: out_form, out_dir, out_name, mk_dir
 
     do i=1,Ntraj
@@ -173,9 +173,10 @@ call MPI_Init ( ierr )
     call MPI_Comm_rank(MPI_COMM_WORLD, proc, error)
 
     if((Nproc > 20).and.(proc .eq. 0)) then
-        print *, "Run with maximum 20 processors:"
-        print *, "  mpirun -np <#proc> ./eikonal <#agents> <string of #proc values of g>"
-        call exit(1)
+        print *, "WARNING: Running on more than 20 cores..."
+!        print *, "Run with maximum 20 processors:"
+!        print *, "  mpirun -np <#proc> ./eikonal <#agents (parallel runs)>"
+!        call exit(1)
     end if
 
     ! # of process labels the value of g used in the simulation
@@ -365,7 +366,7 @@ call MPI_Init ( ierr )
 
                 ! value parameters (value of each lattice point)
                 w(state(i,1), state(i,2)) = w(state(i,1), state(i,2)) &
-                    + beta*delta/(1.+(visits(state(i,1), state(i,2)))**.5)
+                    + beta*delta /(1.+(visits(state(i,1), state(i,2))/Trlx)**.5)
 
             end do
             do i=1, Na
@@ -378,7 +379,8 @@ call MPI_Init ( ierr )
             end do
 
             ! update baseline -- steady state one-step reward
-            rewbar = rewbar + eta*delta/(1.+.1*(ts*dt))
+            rewbar = rewbar + eta*(rew - rewbar)/(1.+ 1.0e-5*(ts*dt))   ! MC averaging
+!            rewbar = rewbar + eta*delta/(1. + 1.0e-5*(ts*dt))           ! bootstrapping
 
             ! update state
             state = state_new
@@ -390,7 +392,7 @@ call MPI_Init ( ierr )
             end if
 
             ! Print the average reward per walker at some time steps
-            if (mod(ts,int(20/dt))==0) then
+            if (mod(ts,int(100/dt))==0) then
                 write(out_cost,"(3es14.4)") ts*dt, rew/Na, rewbar/Na
             end if
 
@@ -431,11 +433,11 @@ call MPI_Init ( ierr )
         end do
         write(out_rho_av,*) ''
     end do
-    radial_rho = axis_average_1s(rho_av)    ! radial_average(rho_av)
-    radial_val = axis_average_1s(w_av)    ! radial_average(w_av)
-    do i=0, L
-        write(out_radial,"(3es14.4)") i*dx, radial_rho(i), radial_val(i)
-    end do
+!    radial_rho = axis_average_1s(rho_av)    ! radial_average(rho_av)
+!    radial_val = axis_average_1s(w_av)    ! radial_average(w_av)
+!    do i=0, L
+!        write(out_radial,"(3es14.4)") i*dx, radial_rho(i), radial_val(i)
+!    end do
 
     do i=1, Ntraj
         close(out_traj(i))
@@ -589,9 +591,12 @@ contains
         call replace_blanks(out_name,'0')
         open(unit=out_radial, file=trim(adjustl(out_name)), action="write", status="replace")
 
-        ! open file for the empirical density
+        ! open file for the empirical density..
         write(out_name,*) trim(adjustl(out_dir)) // "/rho_av.dat"
         open(unit=out_rho_av, file=trim(adjustl(out_name)), action="write", status="replace")
+        ! .. and its radial average
+        write(out_name,*) trim(adjustl(out_dir)) // "/rho_av_radial.dat"
+        open(unit=out_rho_av_rad, file=trim(adjustl(out_name)), action="write", status="replace")
 
 
         !
